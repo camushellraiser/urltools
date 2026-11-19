@@ -517,10 +517,6 @@ def render_naming_converter():
         project=st.text_input('Project Name (editable)',key=widget_key('naming_project'))
     with col2:
         requester=st.text_input('Requester Name',key=widget_key('naming_requester'))
-    # Preview the EDITABLE project field, not the originally pasted request.
-    preview_name = project.strip()
-    if raw.strip() or preview_name:
-        st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(preview_name or '—')+'</div></div>', unsafe_allow_html=True)
     gts=st.session_state.get(widget_key('converter_gts')) or st.session_state.get('shared_gts',get_default_project_code())
     langs=st.session_state.get('shared_languages',[])
     marketing=st.session_state.get('shared_marketing',False)
@@ -535,6 +531,30 @@ def render_naming_converter():
             product=not tab1_product.empty
         except Exception:
             pass
+    # Rebuild the complete Wordbee name live, before Convert is pressed.
+    preview_ready = bool(
+        re.fullmatch(r'\d+', order.strip())
+        and project.strip()
+        and len(requester.strip().split()) >= 2
+        and re.fullmatch(r'GTS\d+', gts.strip(), flags=re.I)
+        and (marketing or product)
+    )
+    if raw.strip() or order.strip() or project.strip() or requester.strip():
+        if preview_ready:
+            preview_value = build_naming_results(
+                order.strip(), project.strip(), requester.strip(), gts.strip(),
+                langs, marketing, product
+            )['Wordbee Name']
+        else:
+            preview_value = 'Complete the required fields and Tab 1 data to preview the Wordbee name.'
+        st.markdown(
+            '<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;'
+            'padding:16px;margin:8px 0">'
+            '<div style="opacity:.7;font-size:.85rem">LIVE WORDBEE NAME PREVIEW</div>'
+            '<div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'
+            + html.escape(preview_value) + '</div></div>',
+            unsafe_allow_html=True
+        )
     st.markdown('#### Information from Tab 1')
     a,b,c=st.columns(3)
     a.text_input('GTS ID (from Tab 1)',value=gts,disabled=True)
