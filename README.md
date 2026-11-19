@@ -1,36 +1,26 @@
 # Thermo Fisher | URL Tools
 
-Streamlit application with two independent tabs:
+Streamlit application with three tabs:
 
-- **URL Converter:** Converts marketing URLs, builds per-language product inclusion lists, and exports Excel files or a combined ZIP.
-- **AEM URLs:** Builds Local Author, Regional Author, Regional Sites / Rollout, and Global Author URLs from the first worksheet of a translation request workbook, including LATAM destination selection.
-
-## Requirements
-
-- Python 3.10 or newer
-- Dependencies listed in `requirements.txt`
+1. **URL Converter** — Multi-sheet Marketing URL conversions, Product Inclusion Lists, individual Excel downloads and ZIP download.
+2. **AEM URLs** — First-sheet translation workbook processing, Local/Regional/Global Author and Rollout URLs, LATAM destination selection, and formatted Excel export.
+3. **Naming Converter** — Paste a Wordbee request, edit its project name and requester, and generate Wordbee, per-language AEM, and Shared Folder names using GTS ID, detected languages and Marketing/Product content types from Tab 1.
 
 ## Run locally
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-# Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Deploy with Streamlit Community Cloud
+## Deploy
 
-1. Push the contents of this folder to your Git repository (keep `app.py` and `requirements.txt` at the repository root).
-2. Create a Streamlit app from the repository and select `app.py` as the entry point.
-3. Deploy. No secrets or API keys are required by the current code.
+Push the contents of this folder (including `.streamlit/config.toml`) to the root of your Git repository. Configure `app.py` as the Streamlit entrypoint.
 
-**Important:** This tool processes uploaded workbooks. Only deploy to a hosting environment approved for the sensitivity of your company's data; do not upload confidential workbooks to unapproved public hosting.
+## Notes
 
-## Files
-
-- `app.py` — complete Streamlit app
-- `requirements.txt` — Python dependencies
-- `.streamlit/config.toml` — optional UI defaults
-- `.gitignore` — ignores local Python and Streamlit artifacts
+- Load an Excel workbook in Tab 1 before using the Naming Converter. The detected languages and Marketing/Product flags come from its processed records, not from free text pasted into Tab 3.
+- Wordbee request parsing supports a copied tab-delimited row or Markdown table with title, order number, company and requester. The editable fields can be corrected before conversion.
+- Reset in any tab clears all three tabs, including uploads and GTS ID, as with a fresh application session.
+- The GTS placeholder `GTS2600XX` must be replaced with a numeric GTS ID to enable Convert.
+- No external API keys are required. Deploy only in an approved environment for internal workbooks.

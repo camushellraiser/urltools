@@ -1,4 +1,5 @@
 import io
+import html
 import re
 import zipfile
 from urllib.parse import urlparse
@@ -17,7 +18,7 @@ st.markdown('''<style>
 .hero p {opacity:.88;margin:0;font-size:1.05rem;}
 .pill {display:inline-block;padding:.32rem .68rem;margin:.18rem .18rem .18rem 0;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);font-size:.88rem;}
 [data-testid="stMetric"] {background:rgba(127,127,127,.07);border:1px solid rgba(127,127,127,.15);padding:14px;border-radius:18px;}
-</style><div class="hero"><h1>🌐 Thermo Fisher | URL Tools</h1><p>Marketing URL conversion, Product Inclusion Lists and AEM translation URL generation in one place.</p><br><span class="pill">URL Converter</span><span class="pill">AEM URLs</span><span class="pill">Excel exports</span></div>''', unsafe_allow_html=True)
+</style><div class="hero"><h1>🌐 Thermo Fisher | URL Tools</h1><p>Marketing URL conversion, Product Inclusion Lists and AEM translation URL generation in one place.</p><br><span class="pill">URL Converter</span><span class="pill">AEM URLs</span><span class="pill">Naming Converter</span><span class="pill">Excel exports</span></div>''', unsafe_allow_html=True)
 
 AUTHOR = 'https://author-prod-use1.aemprod.thermofisher.net'
 LOCALES = {
@@ -135,8 +136,13 @@ def render_url_converter():
     st.subheader('🔗 URL Converter')
     st.caption('Process all sheets to generate Marketing URLs and Product Inclusion Lists.')
     project_code=st.text_input('GTS ID',value=get_default_project_code(),key='converter_gts').strip() or get_default_project_code()
+    st.session_state['shared_gts']=project_code
     uploaded=st.file_uploader('Upload an Excel File',type=['xlsx'],key='converter_upload')
     if not uploaded:
+        if st.button('🔁 Reset',key='converter_reset_empty'):
+            reset_application()
+        for k in ('shared_languages','shared_marketing','shared_product'):
+            st.session_state.pop(k,None)
         st.info('Upload an .xlsx workbook to begin.')
         return
     try:
@@ -144,6 +150,9 @@ def render_url_converter():
     except Exception as exc:
         st.error(f'Could not process workbook: {exc}')
         return
+    st.session_state['shared_languages']=sorted(set(df_marketing.get('Language',pd.Series(dtype=str)).tolist()+df_product.get('Language',pd.Series(dtype=str)).tolist()))
+    st.session_state['shared_marketing']=not df_marketing.empty
+    st.session_state['shared_product']=not df_product.empty
     buffers_all={}
     if not df_marketing.empty:
         df_marketing=df_marketing.sort_values(by=['Language','Original URL'],ascending=[True,True]).reset_index(drop=True)
@@ -177,9 +186,7 @@ def render_url_converter():
             st.download_button('📥 Download All',zip_buf.getvalue(),file_name=f'{project_code} - All Downloads.zip',mime='application/zip',key='converter_all')
         with right:
             if st.button('🔁 Reset',key='converter_reset'):
-                st.session_state.pop('converter_upload',None)
-                st.session_state.pop('converter_gts',None)
-                st.rerun()
+                reset_application()
 
 # AEM URLs: original first-sheet translation workflow.
 def clean_header(v):
@@ -319,6 +326,8 @@ def render_aem_urls():
     uploaded=st.file_uploader('Drop your translation request Excel here',type=['xlsx','xlsm'],help='Only the first worksheet is analyzed.',key='aem_upload')
     if not uploaded:
         st.info('Upload an .xlsx or .xlsm file to begin. The original workbook is not modified.')
+        if st.button('🔁 Reset',key='aem_reset'):
+            reset_application()
         return
     try:
         sheet,rows=parse(uploaded.getvalue())
@@ -346,14 +355,128 @@ def render_aem_urls():
         return
     st.success('Your URL workbook is ready — each detected language has its own worksheet.')
     st.download_button('⬇️ Download generated Excel',output,file_name='aem_translation_urls.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True,key='aem_download')
+    if st.button('🔁 Reset',key='aem_reset'):
+        reset_application()
+
+
+# Naming Converter: receives workbook metadata from Tab 1.
+LANGUAGE_SUFFIXES = {
+    'de-DE':'DE', 'es-ES':'ES', 'fr-FR':'FR', 'ja-JP':'JP',
+    'ko-KR':'KR', 'zh-CN':'CN', 'zh-TW':'TW', 'pt-BR':'BR',
+    'es-LATAM':'LATAM',
+}
+
+
+def reset_application():
+    """Clear all app widget data and reload Streamlit (equivalent to a clean refresh)."""
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+
+def parse_wordbee_text(raw):
+    """Accept tab-delimited clipboard rows, Markdown tables, or plain text."""
+    text = raw.strip()
+    if not text:
+        return {'order':'', 'request':'', 'requester':''}
+    # Strip Markdown hyperlinks, while retaining their visible labels.
+    plain = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
+    plain = re.sub(r'<[^>]*>', ' ', plain)
+    lines = [line.strip() for line in plain.splitlines() if line.strip()]
+    first = next((line for line in lines if not re.match(r'^\|?\s*:?[-]{2,}',line)), '')
+    fields = [v.strip().strip('* ').strip() for v in (first.split('|') if '|' in first else first.split('\t')) if v.strip().strip('* ')]
+    order = next((v for v in fields if re.fullmatch(r'\d{4,12}',v)), '')
+    if not order:
+        match = re.search(r'(?<!\d)\d{5,9}(?!\d)',plain)
+        order = match.group(0) if match else ''
+    request = fields[0] if fields else ''
+    request = re.sub(r'^Text Translation:\s*','',request,flags=re.I).strip()
+    requester = ''
+    if len(fields)>=5:
+        requester = fields[-1]
+    elif len(fields)>=3 and order:
+        candidates = [v for v in fields if re.fullmatch(r'[A-Za-zÀ-ÿ]+(?:[ -][A-Za-zÀ-ÿ]+)+',v) and v != request and 'Thermo Fisher' not in v]
+        requester = candidates[-1] if candidates else ''
+    return {'order':order,'request':request,'requester':requester}
+
+
+def build_naming_results(order,project,requester,gts,languages,marketing,product):
+    words = requester.strip().split()
+    if len(words)<2:
+        raise ValueError('Enter the requester first and last name.')
+    person = words[0][0].upper()+''.join(words[1:])
+    stem = f'{gts}_Web_{person}'
+    base = f'{stem}_{project.strip()}'
+    suffix = ('_AEM' if marketing else '')+('_PDP' if product else '')
+    return {
+        'Wordbee Name':f'GTS-{order}-{base}{suffix}',
+        'AEM Names':[(lang,f'{base}_{LANGUAGE_SUFFIXES[lang]}') for lang in languages if lang in LANGUAGE_SUFFIXES],
+        'Shared Folder Name':stem,
+    }
+
+
+def render_naming_converter():
+    st.subheader('🏷️ Naming Converter')
+    st.caption('Paste a Wordbee request, edit its name, and generate naming conventions using Tab 1 data.')
+    raw = st.text_area('Paste Wordbee request',height=130,key='naming_raw',placeholder='Paste a Wordbee order row here...')
+    # Display the current input immediately, without waiting for Convert.
+    if raw.strip():
+        st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(raw.strip())+'</div></div>',unsafe_allow_html=True)
+    parsed = parse_wordbee_text(raw)
+    if st.session_state.get('naming_previous_raw') != raw:
+        st.session_state['naming_previous_raw']=raw
+        st.session_state['naming_order']=parsed['order']
+        st.session_state['naming_project']=parsed['request']
+        st.session_state['naming_requester']=parsed['requester']
+        st.session_state.pop('naming_result',None)
+    col1,col2=st.columns(2)
+    with col1:
+        order=st.text_input('Wordbee Order ID',key='naming_order')
+        project=st.text_input('Project Name (editable)',key='naming_project')
+    with col2:
+        requester=st.text_input('Requester Name',key='naming_requester')
+    gts=st.session_state.get('shared_gts',get_default_project_code())
+    langs=st.session_state.get('shared_languages',[])
+    marketing=st.session_state.get('shared_marketing',False)
+    product=st.session_state.get('shared_product',False)
+    st.markdown('#### Information from Tab 1')
+    a,b,c=st.columns(3)
+    a.text_input('GTS ID (from Tab 1)',value=gts,disabled=True,key='naming_gts_display')
+    b.text_input('Languages (from Tab 1)',value=', '.join(langs) or 'None detected',disabled=True,key='naming_lang_display')
+    c.text_input('Content Type (from Tab 1)',value=' + '.join([x for x,yes in [('Marketing',marketing),('Product',product)] if yes]) or 'None detected',disabled=True,key='naming_type_display')
+    if not langs or not (marketing or product):
+        st.info('Upload a workbook in Tab 1 to detect languages and content type before converting.')
+    valid_gts=bool(re.fullmatch(r'GTS\d+',gts.strip(),flags=re.I))
+    ready=bool(re.fullmatch(r'\d+',order.strip()) and project.strip() and len(requester.strip().split())>=2 and valid_gts and langs and (marketing or product))
+    if st.button('Convert',type='primary',disabled=not ready,key='naming_convert'):
+        st.session_state['naming_result']=build_naming_results(order.strip(),project.strip(),requester.strip(),gts.strip(),langs,marketing,product)
+        st.session_state['naming_result_signature']=(order,project,requester,gts,tuple(langs),marketing,product)
+    signature=(order,project,requester,gts,tuple(langs),marketing,product)
+    if st.session_state.get('naming_result_signature') != signature:
+        st.session_state.pop('naming_result',None)
+    result=st.session_state.get('naming_result')
+    if result:
+        st.success('Names generated successfully.')
+        st.markdown('#### Wordbee Name')
+        st.code(result['Wordbee Name'])
+        st.markdown('#### AEM Names')
+        for lang,value in result['AEM Names']:
+            st.caption(lang)
+            st.code(value)
+        st.markdown('#### Shared Folder Name')
+        st.code(result['Shared Folder Name'])
+    if st.button('🔁 Reset',key='naming_reset'):
+        reset_application()
 
 
 def main():
-    tab_converter,tab_aem=st.tabs(['🔗 URL Converter','🌐 AEM URLs'])
+    tab_converter,tab_aem,tab_naming=st.tabs(['🔗 URL Converter','🌐 AEM URLs','🏷️ Naming Converter'])
     with tab_converter:
         render_url_converter()
     with tab_aem:
         render_aem_urls()
+    with tab_naming:
+        render_naming_converter()
 
 
 if __name__=='__main__':
