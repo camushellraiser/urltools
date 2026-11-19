@@ -48,7 +48,7 @@ def get_default_project_code():
 def detect_header_marketing(df):
     for i,row in df.iterrows():
         cells = row.astype(str).str.lower()
-        if any('page title' in str(cell) for cell in cells) and any('url' in str(cell) for cell in cells):
+        if any('page title' in cell for cell in cells) and any('url' in cell for cell in cells):
             return i
     return 0
 
@@ -112,7 +112,7 @@ def process_all_sheets(file):
                         seg=cell.split('/product/',1)[1]
                         pid=re.split(r'[/\?#]',seg)[0]
                         break
-            murl=next((c for c in cells if isinstance(c,str) and '/home/' in urlparse(c.strip()).path),None)
+            murl=next((c for c in cells if isinstance(c,str) and '/home/' in urlparse(c).path),None)
             if pid:
                 for col,lang in lang_cols.items():
                     val=row.get(col)
@@ -375,29 +375,38 @@ def reset_application():
 
 
 def parse_wordbee_text(raw):
-    """Accept tab-delimited clipboard rows, Markdown tables, or plain text."""
-    text = raw.strip()
+    """Parse Wordbee table rows and flattened browser clipboard text."""
+    text = html.unescape(raw).strip()
     if not text:
-        return {'order':'', 'request':'', 'requester':''}
-    # Strip Markdown hyperlinks, while retaining their visible labels.
+        return {'order': '', 'request': '', 'requester': ''}
     plain = re.sub(r'\[([^\]]+)\]\([^)]*\)', r'\1', text)
     plain = re.sub(r'<[^>]*>', ' ', plain)
-    lines = [line.strip() for line in plain.splitlines() if line.strip()]
-    first = next((line for line in lines if not re.match(r'^\|?\s*:?[-]{2,}',line)), '')
-    fields = [v.strip().strip('* ').strip() for v in (first.split('|') if '|' in first else first.split('\t')) if v.strip().strip('* ')]
-    order = next((v for v in fields if re.fullmatch(r'\d{4,12}',v)), '')
-    if not order:
-        match = re.search(r'(?<!\d)\d{5,9}(?!\d)',plain)
-        order = match.group(0) if match else ''
-    request = fields[0] if fields else ''
-    request = re.sub(r'^Text Translation:\s*','',request,flags=re.I).strip()
+    # Markdown table separators are not data.
+    lines = [line.strip() for line in plain.splitlines()
+             if line.strip() and not re.fullmatch(r'[|:\s-]+', line.strip())]
+    plain = ' '.join(lines)
+    plain = re.sub(r'\s+', ' ', plain).strip()
+    fields = [re.sub(r'\*', '', x).strip() for x in re.split(r'\s*\|\s*|\t+', plain) if x.strip(' *|')]
+    order_match = re.search(r'(?<!\d)\d{5,12}(?!\d)', plain)
+    order = order_match.group(0) if order_match else ''
+    request = fields[0] if fields else plain
+    # Browser clipboard may flatten all columns into a single text string.
+    if order:
+        request = re.split(r'(?<!\d)' + re.escape(order) + r'(?!\d)', request, maxsplit=1)[0]
+    request = re.sub(r'^Text Translation:\s*', '', request, flags=re.I).strip(' *|')
     requester = ''
-    if len(fields)>=5:
-        requester = fields[-1]
-    elif len(fields)>=3 and order:
-        candidates = [v for v in fields if re.fullmatch(r'[A-Za-zÀ-ÿ]+(?:[ -][A-Za-zÀ-ÿ]+)+',v) and v != request and 'Thermo Fisher' not in v]
-        requester = candidates[-1] if candidates else ''
-    return {'order':order,'request':request,'requester':requester}
+    # Last column in Wordbee is the requester, including when a browser
+    # copies the entire row with whitespace instead of tabs.
+    if len(fields) >= 5:
+        requester = fields[-1].strip(' *|')
+    if not requester:
+        tail = plain[order_match.end():] if order_match else ''
+        tail = re.sub(r'(?i)View document\(s\)|Corporation|Thermo Fisher', ' ', tail)
+        tail = re.sub(r'[|*]+', ' ', tail).strip()
+        candidates = re.findall(r"[A-Za-zÀ-ÿ]+(?:[-'][A-Za-zÀ-ÿ]+)?\s+[A-Za-zÀ-ÿ]+(?:[-'][A-Za-zÀ-ÿ]+)?", tail)
+        if candidates:
+            requester = candidates[-1]
+    return {'order': order, 'request': request, 'requester': requester}
 
 
 def build_naming_results(order,project,requester,gts,languages,marketing,product):
@@ -421,7 +430,7 @@ def render_naming_converter():
     raw = st.text_area('Paste Wordbee request',height=130,key='naming_raw',placeholder='Paste a Wordbee order row here...')
     # Display the current input immediately, without waiting for Convert.
     if raw.strip():
-        st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(raw.strip())+'</div></div>',unsafe_allow_html=True)
+        st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(parse_wordbee_text(raw)['request'] or raw.strip())+'</div></div>',unsafe_allow_html=True)
     parsed = parse_wordbee_text(raw)
     if st.session_state.get('naming_previous_raw') != raw:
         st.session_state['naming_previous_raw']=raw
@@ -435,15 +444,25 @@ def render_naming_converter():
         project=st.text_input('Project Name (editable)',key='naming_project')
     with col2:
         requester=st.text_input('Requester Name',key='naming_requester')
-    gts=st.session_state.get('shared_gts',get_default_project_code())
+    gts=st.session_state.get('converter_gts') or st.session_state.get('shared_gts',get_default_project_code())
     langs=st.session_state.get('shared_languages',[])
     marketing=st.session_state.get('shared_marketing',False)
     product=st.session_state.get('shared_product',False)
+    # Recover Tab 1 metadata from its uploader when the shared values are stale.
+    tab1_file=st.session_state.get('converter_upload')
+    if tab1_file is not None and (not langs or not (marketing or product)):
+        try:
+            tab1_marketing,tab1_product=process_all_sheets(io.BytesIO(tab1_file.getvalue()))
+            langs=sorted(set(tab1_marketing.get('Language',pd.Series(dtype=str)).tolist()+tab1_product.get('Language',pd.Series(dtype=str)).tolist()))
+            marketing=not tab1_marketing.empty
+            product=not tab1_product.empty
+        except Exception:
+            pass
     st.markdown('#### Information from Tab 1')
     a,b,c=st.columns(3)
-    a.text_input('GTS ID (from Tab 1)',value=gts,disabled=True,key='naming_gts_display')
-    b.text_input('Languages (from Tab 1)',value=', '.join(langs) or 'None detected',disabled=True,key='naming_lang_display')
-    c.text_input('Content Type (from Tab 1)',value=' + '.join([x for x,yes in [('Marketing',marketing),('Product',product)] if yes]) or 'None detected',disabled=True,key='naming_type_display')
+    a.text_input('GTS ID (from Tab 1)',value=gts,disabled=True)
+    b.text_input('Languages (from Tab 1)',value=', '.join(langs) or 'None detected',disabled=True)
+    c.text_input('Content Type (from Tab 1)',value=' + '.join([x for x,yes in [('Marketing',marketing),('Product',product)] if yes]) or 'None detected',disabled=True)
     if not langs or not (marketing or product):
         st.info('Upload a workbook in Tab 1 to detect languages and content type before converting.')
     valid_gts=bool(re.fullmatch(r'GTS\d+',gts.strip(),flags=re.I))
