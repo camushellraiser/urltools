@@ -1,12 +1,14 @@
 # Thermo Fisher URL Tools
 
-Three Streamlit tabs: URL Converter, AEM URLs, Naming Converter.
+Three-tab Streamlit application: URL Converter, AEM URLs, and Naming Converter.
 
-## Run locally
+## Run
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Upload your workbook in Tab 1 to share GTS ID, languages, and content type with Tab 3.
+Upload an Excel workbook in URL Converter (Tab 1) and enter its GTS ID. Naming Converter (Tab 3) reads the processed languages, content types and GTS ID from Tab 1. Reset clears all tabs.
+
+No workbook is uploaded to GitHub or stored in the repository. Use an approved environment for internal files.

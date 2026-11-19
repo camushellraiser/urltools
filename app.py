@@ -2,6 +2,7 @@ import io
 import html
 import re
 import zipfile
+import traceback
 from urllib.parse import urlparse
 
 import pandas as pd
@@ -46,8 +47,8 @@ def get_default_project_code():
 
 
 def detect_header_marketing(df):
-    for i,row in df.iterrows():
-        cells = row.astype(str).str.lower()
+    for i, row in df.iterrows():
+        cells = [str(cell).lower() if pd.notna(cell) else '' for cell in row]
         if any('page title' in cell for cell in cells) and any('url' in cell for cell in cells):
             return i
     return 0
@@ -55,7 +56,7 @@ def detect_header_marketing(df):
 
 def detect_header_language(df):
     for i,row in df.iterrows():
-        if any(re.match(r'[a-z]{2}-[A-Z]{2}',str(c)) for c in row.astype(str)):
+        if any(re.match(r'[a-z]{2}-[A-Z]{2}',str(c)) for c in row if pd.notna(c)):
             return i
     return 0
 
@@ -149,6 +150,8 @@ def render_url_converter():
         df_marketing,df_product=process_all_sheets(io.BytesIO(uploaded.getvalue()))
     except Exception as exc:
         st.error(f'Could not process workbook: {exc}')
+        with st.expander('Technical error details'):
+            st.code(traceback.format_exc())
         return
     st.session_state['shared_languages']=sorted(set(df_marketing.get('Language',pd.Series(dtype=str)).tolist()+df_product.get('Language',pd.Series(dtype=str)).tolist()))
     st.session_state['shared_marketing']=not df_marketing.empty
