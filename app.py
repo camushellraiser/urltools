@@ -136,9 +136,9 @@ def process_all_sheets(file):
 def render_url_converter():
     st.subheader('🔗 URL Converter')
     st.caption('Process all sheets to generate Marketing URLs and Product Inclusion Lists.')
-    project_code=st.text_input('GTS ID',value=get_default_project_code(),key='converter_gts').strip() or get_default_project_code()
+    project_code=st.text_input('GTS ID',value=get_default_project_code(),key=widget_key('converter_gts')).strip() or get_default_project_code()
     st.session_state['shared_gts']=project_code
-    uploaded=st.file_uploader('Upload an Excel File',type=['xlsx'],key='converter_upload')
+    uploaded=st.file_uploader('Upload an Excel File',type=['xlsx'],key=widget_key('converter_upload'))
     if not uploaded:
         if st.button('🔁 Reset',key='converter_reset_empty'):
             reset_application()
@@ -326,7 +326,7 @@ def make_excel(rows,latam_countries):
 def render_aem_urls():
     st.subheader('🌐 AEM Translation URL Builder')
     st.caption('First sheet only · Automatic locale detection · One worksheet per language · Wrapped Excel URLs')
-    uploaded=st.file_uploader('Drop your translation request Excel here',type=['xlsx','xlsm'],help='Only the first worksheet is analyzed.',key='aem_upload')
+    uploaded=st.file_uploader('Drop your translation request Excel here',type=['xlsx','xlsm'],help='Only the first worksheet is analyzed.',key=widget_key('aem_upload'))
     if not uploaded:
         st.info('Upload an .xlsx or .xlsm file to begin. The original workbook is not modified.')
         if st.button('🔁 Reset',key='aem_reset'):
@@ -347,7 +347,7 @@ def render_aem_urls():
     latam_countries=list(LATAM)
     if 'es-LATAM' in langs:
         st.info('es-LATAM is selected. Choose the Latin America destinations to generate.')
-        latam_countries=st.multiselect('LATAM destinations',list(LATAM),default=list(LATAM),key='aem_latam')
+        latam_countries=st.multiselect('LATAM destinations',list(LATAM),default=list(LATAM),key=widget_key('aem_latam'))
     with st.expander('Preview detected pages',expanded=True):
         for _,title,url,selected in rows:
             st.markdown(f"**{title or 'Untitled page'}**  \n{url}  \n"+' · '.join(f"{LOCALES[lang]['flag']} {lang}" for lang in selected))
@@ -370,10 +370,17 @@ LANGUAGE_SUFFIXES = {
 }
 
 
+def widget_key(name):
+    """Use a fresh widget identity after each reset, including uploaders."""
+    return f"{name}_{st.session_state.get('_reset_generation', 0)}"
+
+
 def reset_application():
-    """Clear all app widget data and reload Streamlit (equivalent to a clean refresh)."""
+    """Clear every tab and remount all inputs, including browser file uploaders."""
+    generation = st.session_state.get('_reset_generation', 0) + 1
     for key in list(st.session_state.keys()):
         del st.session_state[key]
+    st.session_state['_reset_generation'] = generation
     st.rerun()
 
 
@@ -496,30 +503,30 @@ def make_naming_excel(result, gts, order, project, requester, languages, marketi
 def render_naming_converter():
     st.subheader('🏷️ Naming Converter')
     st.caption('Paste a Wordbee request, edit its name, and generate naming conventions using Tab 1 data.')
-    raw = st.text_area('Paste Wordbee request',height=130,key='naming_raw',placeholder='Paste a Wordbee order row here...')
+    raw = st.text_area('Paste Wordbee request',height=130,key=widget_key('naming_raw'),placeholder='Paste a Wordbee order row here...')
     parsed = parse_wordbee_text(raw)
     if st.session_state.get('naming_previous_raw') != raw:
         st.session_state['naming_previous_raw']=raw
-        st.session_state['naming_order']=parsed['order']
-        st.session_state['naming_project']=parsed['request']
-        st.session_state['naming_requester']=parsed['requester']
+        st.session_state[widget_key('naming_order')]=parsed['order']
+        st.session_state[widget_key('naming_project')]=parsed['request']
+        st.session_state[widget_key('naming_requester')]=parsed['requester']
         st.session_state.pop('naming_result',None)
     col1,col2=st.columns(2)
     with col1:
-        order=st.text_input('Wordbee Order ID',key='naming_order')
-        project=st.text_input('Project Name (editable)',key='naming_project')
+        order=st.text_input('Wordbee Order ID',key=widget_key('naming_order'))
+        project=st.text_input('Project Name (editable)',key=widget_key('naming_project'))
     with col2:
-        requester=st.text_input('Requester Name',key='naming_requester')
+        requester=st.text_input('Requester Name',key=widget_key('naming_requester'))
     # Preview the EDITABLE project field, not the originally pasted request.
     preview_name = project.strip()
     if raw.strip() or preview_name:
         st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(preview_name or '—')+'</div></div>', unsafe_allow_html=True)
-    gts=st.session_state.get('converter_gts') or st.session_state.get('shared_gts',get_default_project_code())
+    gts=st.session_state.get(widget_key('converter_gts')) or st.session_state.get('shared_gts',get_default_project_code())
     langs=st.session_state.get('shared_languages',[])
     marketing=st.session_state.get('shared_marketing',False)
     product=st.session_state.get('shared_product',False)
     # Recover Tab 1 metadata from its uploader when the shared values are stale.
-    tab1_file=st.session_state.get('converter_upload')
+    tab1_file=st.session_state.get(widget_key('converter_upload'))
     if tab1_file is not None and (not langs or not (marketing or product)):
         try:
             tab1_marketing,tab1_product=process_all_sheets(io.BytesIO(tab1_file.getvalue()))
