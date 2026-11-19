@@ -427,13 +427,76 @@ def build_naming_results(order,project,requester,gts,languages,marketing,product
     }
 
 
+def make_naming_excel(result, gts, order, project, requester, languages, marketing, product):
+    """Generate a readable, wrapped, styled workbook from the confirmed conversion."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Naming Convention'
+    ws.sheet_view.showGridLines = False
+    ws.freeze_panes = 'A5'
+    ws.merge_cells('A1:C1')
+    ws['A1'] = 'NAMING CONVENTION'
+    ws['A1'].fill = PatternFill('solid', fgColor='0B1F33')
+    ws['A1'].font = Font(name='Aptos Display', size=18, bold=True, color='FFFFFF')
+    ws['A1'].alignment = Alignment(vertical='center', indent=1)
+    ws.row_dimensions[1].height = 42
+    ws.merge_cells('A2:C2')
+    ws['A2'] = f'{gts}  |  Wordbee Order {order}'
+    ws['A2'].font = Font(name='Aptos', size=11, color='0B6B68', bold=True)
+    ws['A2'].alignment = Alignment(vertical='center', indent=1)
+    ws.row_dimensions[2].height = 28
+    for col, width in [('A', 24), ('B', 76), ('C', 24)]:
+        ws.column_dimensions[col].width = width
+    for cell, value in zip(ws[4], ['TYPE', 'GENERATED NAME', 'LANGUAGE']):
+        cell.value = value
+        cell.fill = PatternFill('solid', fgColor='0B6B68')
+        cell.font = Font(name='Aptos', bold=True, color='FFFFFF')
+        cell.alignment = Alignment(vertical='center', wrap_text=True)
+    ws.row_dimensions[4].height = 28
+    records = [('Wordbee Name', result['Wordbee Name'], 'All selected languages')]
+    records += [('AEM Name', value, lang) for lang, value in result['AEM Names']]
+    records.append(('Shared Folder Name', result['Shared Folder Name'], 'Shared'))
+    for index, record in enumerate(records, start=5):
+        ws.append(list(record))
+        ws.row_dimensions[index].height = 46
+        for cell in ws[index]:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+            cell.font = Font(name='Aptos', size=11, color='0B1F33')
+            if index % 2 == 0:
+                cell.fill = PatternFill('solid', fgColor='EFF6F5')
+        ws.cell(index, 1).font = Font(name='Aptos', bold=True, color='0B1F33')
+        ws.cell(index, 2).font = Font(name='Aptos', color='008000', size=11)
+    ws.auto_filter.ref = f'A4:C{ws.max_row}'
+    meta = wb.create_sheet('Request Details')
+    meta.sheet_view.showGridLines = False
+    meta.append(['FIELD', 'VALUE'])
+    info = [
+        ('GTS ID', gts), ('Wordbee Order ID', order),
+        ('Project Name', project), ('Requester', requester),
+        ('Languages', ', '.join(languages)),
+        ('Content Type', ' + '.join(x for x, yes in [('Marketing', marketing), ('Product', product)] if yes)),
+    ]
+    for item in info:
+        meta.append(item)
+    meta.column_dimensions['A'].width = 28
+    meta.column_dimensions['B'].width = 75
+    for cell in meta[1]:
+        cell.fill = PatternFill('solid', fgColor='0B1F33')
+        cell.font = Font(name='Aptos', color='FFFFFF', bold=True)
+    for row in meta.iter_rows():
+        for cell in row:
+            cell.alignment = Alignment(vertical='center', wrap_text=True)
+        meta.row_dimensions[row[0].row].height = 30
+    meta.freeze_panes = 'A2'
+    output = io.BytesIO()
+    wb.save(output)
+    return output.getvalue()
+
+
 def render_naming_converter():
     st.subheader('🏷️ Naming Converter')
     st.caption('Paste a Wordbee request, edit its name, and generate naming conventions using Tab 1 data.')
     raw = st.text_area('Paste Wordbee request',height=130,key='naming_raw',placeholder='Paste a Wordbee order row here...')
-    # Display the current input immediately, without waiting for Convert.
-    if raw.strip():
-        st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(parse_wordbee_text(raw)['request'] or raw.strip())+'</div></div>',unsafe_allow_html=True)
     parsed = parse_wordbee_text(raw)
     if st.session_state.get('naming_previous_raw') != raw:
         st.session_state['naming_previous_raw']=raw
@@ -447,6 +510,10 @@ def render_naming_converter():
         project=st.text_input('Project Name (editable)',key='naming_project')
     with col2:
         requester=st.text_input('Requester Name',key='naming_requester')
+    # Preview the EDITABLE project field, not the originally pasted request.
+    preview_name = project.strip()
+    if raw.strip() or preview_name:
+        st.markdown('<div style="border:1px solid rgba(127,127,127,.2);border-radius:16px;padding:16px;margin:8px 0"><div style="opacity:.7;font-size:.85rem">LIVE INPUT PREVIEW</div><div style="font-size:1.65rem;font-weight:700;overflow-wrap:anywhere">'+html.escape(preview_name or '—')+'</div></div>', unsafe_allow_html=True)
     gts=st.session_state.get('converter_gts') or st.session_state.get('shared_gts',get_default_project_code())
     langs=st.session_state.get('shared_languages',[])
     marketing=st.session_state.get('shared_marketing',False)
@@ -487,6 +554,14 @@ def render_naming_converter():
             st.code(value)
         st.markdown('#### Shared Folder Name')
         st.code(result['Shared Folder Name'])
+        excel_bytes = make_naming_excel(result, gts.strip(), order.strip(), project.strip(), requester.strip(), langs, marketing, product)
+        st.download_button(
+            '📥 Download Naming Convention Excel',
+            data=excel_bytes,
+            file_name=f'{gts.strip()} - Naming Convention.xlsx',
+            mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            key='naming_excel_download',
+        )
     if st.button('🔁 Reset',key='naming_reset'):
         reset_application()
 
